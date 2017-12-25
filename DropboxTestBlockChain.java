@@ -11,6 +11,13 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.math.BigInteger;
+import java.security.InvalidKeyException;
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
+import java.security.NoSuchAlgorithmException;
+import java.security.PublicKey;
+import java.security.Signature;
+import java.security.SignatureException;
 
 public class DropboxTestBlockChain {
    
@@ -22,9 +29,9 @@ public class DropboxTestBlockChain {
    public int maxInput;
    public int maxOutput;
    
-   public ArrayList<RSAKeyPair> people;
+   public ArrayList<KeyPair> people;
 
-   public DropboxTestBlockChain() throws FileNotFoundException, IOException {
+   public DropboxTestBlockChain() throws FileNotFoundException, IOException, NoSuchAlgorithmException {
       
       this.nPeople = 20;
       this.nUTXOTx = 20;
@@ -39,23 +46,23 @@ public class DropboxTestBlockChain {
          key[i] = (byte) 1;
       }
       
-      PRGen prGen = new PRGen(key);
+      KeyPairGenerator prGen = KeyPairGenerator.getInstance("RSA");
       
-      people = new ArrayList<RSAKeyPair>();
+      people = new ArrayList<KeyPair>();
       for (int i = 0; i < nPeople; i++)
-         people.add(new RSAKeyPair(prGen, 265));
+         people.add(prGen.generateKeyPair());
    }
    
    public int test1() {
       System.out.println("Process a block with no transactions");
       
-      Block genesisBlock = new Block(null, people.get(0).getPublicKey());
+      Block genesisBlock = new Block(null, people.get(0).getPublic());
       genesisBlock.finalize();
       
       BlockChain blockChain = new BlockChain(genesisBlock);
       BlockHandler blockHandler = new BlockHandler(blockChain);
       
-      Block block = new Block(genesisBlock.getHash(), people.get(1).getPublicKey());
+      Block block = new Block(genesisBlock.getHash(), people.get(1).getPublic());
       block.finalize();
       
       return UtilCOS.printPassFail(blockHandler.processBlock(block));
@@ -64,23 +71,37 @@ public class DropboxTestBlockChain {
    public int test2() {
       System.out.println("Process a block with a single valid transaction");
       
-      Block genesisBlock = new Block(null, people.get(0).getPublicKey());
+      Block genesisBlock = new Block(null, people.get(0).getPublic());
       genesisBlock.finalize();
       
       BlockChain blockChain = new BlockChain(genesisBlock);
       BlockHandler blockHandler = new BlockHandler(blockChain);
       
-      Block block = new Block(genesisBlock.getHash(), people.get(1).getPublicKey());
+      Block block = new Block(genesisBlock.getHash(), people.get(1).getPublic());
       Transaction spendCoinbaseTx = new Transaction();
       spendCoinbaseTx.addInput(genesisBlock.getCoinbase().getHash(), 0);
-      spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublicKey());
-      spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+      spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublic());
+      spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
+      
       spendCoinbaseTx.finalize();
       block.addTransaction(spendCoinbaseTx);
       block.finalize();
       
       return UtilCOS.printPassFail(blockHandler.processBlock(block));
    }
+
+    public byte[] signTx(KeyPair keyPair, byte[] message) {
+        Signature sig = null;
+        try {
+            sig = Signature.getInstance("SHA256withRSA");
+            sig.initSign(keyPair.getPrivate());
+            sig.update(message);
+            byte[] signature = sig.sign();
+            return signature;
+            } catch (SignatureException | NoSuchAlgorithmException | InvalidKeyException e) {
+            throw new RuntimeException(e);
+        }
+    }
    
    public int test3() {
       System.out.println("Process a block with many valid transactions");
@@ -88,25 +109,25 @@ public class DropboxTestBlockChain {
       boolean passes = true;
       
       for (int k = 0; k < 20; k++) {
-         Block genesisBlock = new Block(null, people.get(0).getPublicKey());
+         Block genesisBlock = new Block(null, people.get(0).getPublic());
          genesisBlock.finalize();
          
          BlockChain blockChain = new BlockChain(genesisBlock);
          BlockHandler blockHandler = new BlockHandler(blockChain);
          
-         Block block = new Block(genesisBlock.getHash(), people.get(1).getPublicKey());
+         Block block = new Block(genesisBlock.getHash(), people.get(1).getPublic());
          Transaction spendCoinbaseTx = new Transaction();
          spendCoinbaseTx.addInput(genesisBlock.getCoinbase().getHash(), 0);
          
          double totalValue = 0;
          UTXOPool utxoPool = new UTXOPool();
          int numOutputs = 0;
-         HashMap<UTXO, RSAKeyPair> utxoToKeyPair = new HashMap<UTXO, RSAKeyPair>();
-         HashMap<Integer, RSAKeyPair> keyPairAtIndex = new HashMap<Integer, RSAKeyPair>();
+         HashMap<UTXO, KeyPair> utxoToKeyPair = new HashMap<UTXO, KeyPair>();
+         HashMap<Integer, KeyPair> keyPairAtIndex = new HashMap<Integer, KeyPair>();
          
          for (int j = 0; j < maxUTXOTxOutput; j++) {
             int rIndex = SampleRandom.randomInt(people.size());
-            RSAKey addr = people.get(rIndex).getPublicKey();
+            PublicKey addr = people.get(rIndex).getPublic();
             double value = SampleRandom.randomDouble(maxValue);
             if (totalValue + value > Block.COINBASE)
                break;
@@ -116,7 +137,7 @@ public class DropboxTestBlockChain {
             numOutputs++;
          }
          
-         spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+         spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
          spendCoinbaseTx.finalize();
          block.addTransaction(spendCoinbaseTx);
          
@@ -159,12 +180,12 @@ public class DropboxTestBlockChain {
                if (outputValue + value > inputValue)
                   break;
                int rIndex = SampleRandom.randomInt(people.size());
-               RSAKey addr = people.get(rIndex).getPublicKey();
+               PublicKey addr = people.get(rIndex).getPublic();
                tx.addOutput(value, addr);
                outputValue += value;
             }
             for (int j = 0; j < numInputs; j++) {
-               tx.addSignature(utxoToKeyPair.get(utxoAtIndex.get(j)).getPrivateKey().sign(tx.getRawDataToSign(j)), j);
+               tx.addSignature(signTx(utxoToKeyPair.get(utxoAtIndex.get(j)), tx.getRawDataToSign(j)), j);
             }
             tx.finalize();
             block.addTransaction(tx);
@@ -184,25 +205,25 @@ public class DropboxTestBlockChain {
       boolean passes = true;
       
       for (int k = 0; k < 20; k++) {
-         Block genesisBlock = new Block(null, people.get(0).getPublicKey());
+         Block genesisBlock = new Block(null, people.get(0).getPublic());
          genesisBlock.finalize();
          
          BlockChain blockChain = new BlockChain(genesisBlock);
          BlockHandler blockHandler = new BlockHandler(blockChain);
          
-         Block block = new Block(genesisBlock.getHash(), people.get(1).getPublicKey());
+         Block block = new Block(genesisBlock.getHash(), people.get(1).getPublic());
          Transaction spendCoinbaseTx = new Transaction();
          spendCoinbaseTx.addInput(genesisBlock.getCoinbase().getHash(), 0);
          
          double totalValue = 0;
          UTXOPool utxoPool = new UTXOPool();
          int numOutputs = 0;
-         HashMap<UTXO, RSAKeyPair> utxoToKeyPair = new HashMap<UTXO, RSAKeyPair>();
-         HashMap<Integer, RSAKeyPair> keyPairAtIndex = new HashMap<Integer, RSAKeyPair>();
+         HashMap<UTXO, KeyPair> utxoToKeyPair = new HashMap<UTXO, KeyPair>();
+         HashMap<Integer, KeyPair> keyPairAtIndex = new HashMap<Integer, KeyPair>();
          
          for (int j = 0; j < maxUTXOTxOutput; j++) {
             int rIndex = SampleRandom.randomInt(people.size());
-            RSAKey addr = people.get(rIndex).getPublicKey();
+            PublicKey addr = people.get(rIndex).getPublic();
             double value = SampleRandom.randomDouble(maxValue);
             if (totalValue + value > Block.COINBASE)
                break;
@@ -212,7 +233,7 @@ public class DropboxTestBlockChain {
             numOutputs++;
          }
          
-         spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+         spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
          spendCoinbaseTx.finalize();
          block.addTransaction(spendCoinbaseTx);
          
@@ -255,12 +276,12 @@ public class DropboxTestBlockChain {
                if (outputValue + value > inputValue)
                   break;
                int rIndex = SampleRandom.randomInt(people.size());
-               RSAKey addr = people.get(rIndex).getPublicKey();
+               PublicKey addr = people.get(rIndex).getPublic();
                tx.addOutput(value, addr);
                outputValue += value;
             }
             for (int j = 0; j < numInputs; j++) {
-               tx.addSignature(utxoToKeyPair.get(utxoAtIndex.get(j)).getPrivateKey().sign(tx.getRawDataToSign(j)), j);
+               tx.addSignature(signTx(utxoToKeyPair.get(utxoAtIndex.get(j)), tx.getRawDataToSign(j)), j);
             }
             tx.finalize();
             block.addTransaction(tx);
@@ -277,13 +298,13 @@ public class DropboxTestBlockChain {
    public int test4() {
       System.out.println("Process a new genesis block");
       
-      Block genesisBlock = new Block(null, people.get(0).getPublicKey());
+      Block genesisBlock = new Block(null, people.get(0).getPublic());
       genesisBlock.finalize();
       
       BlockChain blockChain = new BlockChain(genesisBlock);
       BlockHandler blockHandler = new BlockHandler(blockChain);
       
-      Block genesisblock = new Block(null, people.get(1).getPublicKey());
+      Block genesisblock = new Block(null, people.get(1).getPublic());
       genesisblock.finalize();
       
       return UtilCOS.printPassFail(!blockHandler.processBlock(genesisblock));
@@ -292,7 +313,7 @@ public class DropboxTestBlockChain {
    public int test5() {
       System.out.println("Process a block with an invalid prevBlockHash");
       
-      Block genesisBlock = new Block(null, people.get(0).getPublicKey());
+      Block genesisBlock = new Block(null, people.get(0).getPublic());
       genesisBlock.finalize();
       BlockChain blockChain = new BlockChain(genesisBlock);
       BlockHandler blockHandler = new BlockHandler(blockChain);
@@ -300,7 +321,7 @@ public class DropboxTestBlockChain {
       byte[] hash = genesisBlock.getHash();
       byte[] hashCopy = Arrays.copyOf(hash, hash.length);
       hashCopy[0]++;
-      Block block = new Block(hashCopy, people.get(1).getPublicKey());
+      Block block = new Block(hashCopy, people.get(1).getPublic());
       block.finalize();
       
       return UtilCOS.printPassFail(!blockHandler.processBlock(block));
@@ -311,89 +332,89 @@ public class DropboxTestBlockChain {
       
       boolean passes = true;
       
-      Block genesisBlock = new Block(null, people.get(0).getPublicKey());
+      Block genesisBlock = new Block(null, people.get(0).getPublic());
       genesisBlock.finalize();
       
       BlockChain blockChain = new BlockChain(genesisBlock);
       BlockHandler blockHandler = new BlockHandler(blockChain);
       
-      Block block = new Block(genesisBlock.getHash(), people.get(1).getPublicKey());
+      Block block = new Block(genesisBlock.getHash(), people.get(1).getPublic());
       Transaction spendCoinbaseTx = new Transaction();
       spendCoinbaseTx.addInput(genesisBlock.getCoinbase().getHash(), 0);
-      spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublicKey());
+      spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublic());
       byte[] rawData = spendCoinbaseTx.getRawDataToSign(0);
       rawData[0]++;
-      spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(rawData), 0);
+      spendCoinbaseTx.addSignature(signTx(people.get(0), rawData), 0);
       spendCoinbaseTx.finalize();
       block.addTransaction(spendCoinbaseTx);
       block.finalize();
       
       passes = passes && !blockHandler.processBlock(block);
       
-      block = new Block(genesisBlock.getHash(), people.get(1).getPublicKey());
+      block = new Block(genesisBlock.getHash(), people.get(1).getPublic());
       spendCoinbaseTx = new Transaction();
       spendCoinbaseTx.addInput(genesisBlock.getCoinbase().getHash(), 0);
-      spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublicKey());
-      spendCoinbaseTx.addSignature(people.get(1).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+      spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublic());
+      spendCoinbaseTx.addSignature(signTx(people.get(1), spendCoinbaseTx.getRawDataToSign(0)), 0);
       spendCoinbaseTx.finalize();
       block.addTransaction(spendCoinbaseTx);
       block.finalize();
       
       passes = passes && !blockHandler.processBlock(block);
       
-      block = new Block(genesisBlock.getHash(), people.get(1).getPublicKey());
+      block = new Block(genesisBlock.getHash(), people.get(1).getPublic());
       spendCoinbaseTx = new Transaction();
       spendCoinbaseTx.addInput(genesisBlock.getCoinbase().getHash(), 0);
-      spendCoinbaseTx.addOutput(Block.COINBASE + 1, people.get(1).getPublicKey());
-      spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+      spendCoinbaseTx.addOutput(Block.COINBASE + 1, people.get(1).getPublic());
+      spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
       spendCoinbaseTx.finalize();
       block.addTransaction(spendCoinbaseTx);
       block.finalize();
       
       passes = passes && !blockHandler.processBlock(block);
       
-      block = new Block(genesisBlock.getHash(), people.get(1).getPublicKey());
+      block = new Block(genesisBlock.getHash(), people.get(1).getPublic());
       spendCoinbaseTx = new Transaction();
       byte[] hash = genesisBlock.getCoinbase().getHash();
       byte[] hashCopy = Arrays.copyOf(hash, hash.length);
       hashCopy[0]++;
       spendCoinbaseTx.addInput(hashCopy, 0);
-      spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublicKey());
-      spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+      spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublic());
+      spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
       spendCoinbaseTx.finalize();
       block.addTransaction(spendCoinbaseTx);
       block.finalize();
       
       passes = passes && !blockHandler.processBlock(block);
       
-      block = new Block(genesisBlock.getHash(), people.get(1).getPublicKey());
+      block = new Block(genesisBlock.getHash(), people.get(1).getPublic());
       spendCoinbaseTx = new Transaction();
       spendCoinbaseTx.addInput(genesisBlock.getCoinbase().getHash(), 1);
-      spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublicKey());
-      spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+      spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublic());
+      spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
       spendCoinbaseTx.finalize();
       block.addTransaction(spendCoinbaseTx);
       block.finalize();
       
       passes = passes && !blockHandler.processBlock(block);
       
-      block = new Block(genesisBlock.getHash(), people.get(1).getPublicKey());
+      block = new Block(genesisBlock.getHash(), people.get(1).getPublic());
       spendCoinbaseTx = new Transaction();
       spendCoinbaseTx.addInput(genesisBlock.getCoinbase().getHash(), 0);
       spendCoinbaseTx.addInput(genesisBlock.getCoinbase().getHash(), 0);
-      spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublicKey());
-      spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+      spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublic());
+      spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
       spendCoinbaseTx.finalize();
       block.addTransaction(spendCoinbaseTx);
       block.finalize();
       
       passes = passes && !blockHandler.processBlock(block);
       
-      block = new Block(genesisBlock.getHash(), people.get(1).getPublicKey());
+      block = new Block(genesisBlock.getHash(), people.get(1).getPublic());
       spendCoinbaseTx = new Transaction();
       spendCoinbaseTx.addInput(genesisBlock.getCoinbase().getHash(), 0);
-      spendCoinbaseTx.addOutput(-Block.COINBASE, people.get(1).getPublicKey());
-      spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+      spendCoinbaseTx.addOutput(-Block.COINBASE, people.get(1).getPublic());
+      spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
       spendCoinbaseTx.finalize();
       block.addTransaction(spendCoinbaseTx);
       block.finalize();
@@ -406,7 +427,7 @@ public class DropboxTestBlockChain {
    public int test7() {
       System.out.println("Process multiple blocks directly on top of the genesis block");
       
-      Block genesisBlock = new Block(null, people.get(0).getPublicKey());
+      Block genesisBlock = new Block(null, people.get(0).getPublic());
       genesisBlock.finalize();
       
       BlockChain blockChain = new BlockChain(genesisBlock);
@@ -417,11 +438,11 @@ public class DropboxTestBlockChain {
       Transaction spendCoinbaseTx;
       
       for (int i = 0; i < 100; i++) {
-         block = new Block(genesisBlock.getHash(), people.get(1).getPublicKey());
+         block = new Block(genesisBlock.getHash(), people.get(1).getPublic());
          spendCoinbaseTx = new Transaction();
          spendCoinbaseTx.addInput(genesisBlock.getCoinbase().getHash(), 0);
-         spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublicKey());
-         spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+         spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublic());
+         spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
          spendCoinbaseTx.finalize();
          block.addTransaction(spendCoinbaseTx);
          block.finalize();
@@ -434,7 +455,7 @@ public class DropboxTestBlockChain {
    public int test15() {
       System.out.println("Process a block containing a transaction that claims a UTXO already claimed by a transaction in its parent");
       
-      Block genesisBlock = new Block(null, people.get(0).getPublicKey());
+      Block genesisBlock = new Block(null, people.get(0).getPublic());
       genesisBlock.finalize();
       
       BlockChain blockChain = new BlockChain(genesisBlock);
@@ -442,11 +463,11 @@ public class DropboxTestBlockChain {
       
       boolean passes = true;
       
-      Block block = new Block(genesisBlock.getHash(), people.get(1).getPublicKey());
+      Block block = new Block(genesisBlock.getHash(), people.get(1).getPublic());
       Transaction spendCoinbaseTx = new Transaction();
       spendCoinbaseTx.addInput(genesisBlock.getCoinbase().getHash(), 0);
-      spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublicKey());
-      spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+      spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublic());
+      spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
       spendCoinbaseTx.finalize();
       block.addTransaction(spendCoinbaseTx);
       block.finalize();
@@ -455,11 +476,11 @@ public class DropboxTestBlockChain {
       
       Block prevBlock = block;
       
-      block = new Block(prevBlock.getHash(), people.get(2).getPublicKey());
+      block = new Block(prevBlock.getHash(), people.get(2).getPublic());
       spendCoinbaseTx = new Transaction();
       spendCoinbaseTx.addInput(genesisBlock.getCoinbase().getHash(), 0);
-      spendCoinbaseTx.addOutput(Block.COINBASE - 1, people.get(2).getPublicKey());
-      spendCoinbaseTx.addSignature(people.get(1).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+      spendCoinbaseTx.addOutput(Block.COINBASE - 1, people.get(2).getPublic());
+      spendCoinbaseTx.addSignature(signTx(people.get(1), spendCoinbaseTx.getRawDataToSign(0)), 0);
       spendCoinbaseTx.finalize();
       block.addTransaction(spendCoinbaseTx);
       block.finalize();
@@ -472,7 +493,7 @@ public class DropboxTestBlockChain {
    public int test16() {
       System.out.println("Process a block containing a transaction that claims a UTXO not on its branch");
       
-      Block genesisBlock = new Block(null, people.get(0).getPublicKey());
+      Block genesisBlock = new Block(null, people.get(0).getPublic());
       genesisBlock.finalize();
       
       BlockChain blockChain = new BlockChain(genesisBlock);
@@ -480,11 +501,11 @@ public class DropboxTestBlockChain {
       
       boolean passes = true;
       
-      Block block = new Block(genesisBlock.getHash(), people.get(1).getPublicKey());
+      Block block = new Block(genesisBlock.getHash(), people.get(1).getPublic());
       Transaction spendCoinbaseTx = new Transaction();
       spendCoinbaseTx.addInput(genesisBlock.getCoinbase().getHash(), 0);
-      spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublicKey());
-      spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+      spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublic());
+      spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
       spendCoinbaseTx.finalize();
       block.addTransaction(spendCoinbaseTx);
       block.finalize();
@@ -493,11 +514,11 @@ public class DropboxTestBlockChain {
       
       Block prevBlock = block;
       
-      block = new Block(genesisBlock.getHash(), people.get(2).getPublicKey());
+      block = new Block(genesisBlock.getHash(), people.get(2).getPublic());
       spendCoinbaseTx = new Transaction();
       spendCoinbaseTx.addInput(prevBlock.getCoinbase().getHash(), 0);
-      spendCoinbaseTx.addOutput(Block.COINBASE, people.get(2).getPublicKey());
-      spendCoinbaseTx.addSignature(people.get(1).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+      spendCoinbaseTx.addOutput(Block.COINBASE, people.get(2).getPublic());
+      spendCoinbaseTx.addSignature(signTx(people.get(1), spendCoinbaseTx.getRawDataToSign(0)), 0);
       spendCoinbaseTx.finalize();
       block.addTransaction(spendCoinbaseTx);
       block.finalize();
@@ -510,7 +531,7 @@ public class DropboxTestBlockChain {
    public int test17() {
       System.out.println("Process a block containing a transaction that claims a UTXO from earlier in its branch that has not yet been claimed");
       
-      Block genesisBlock = new Block(null, people.get(0).getPublicKey());
+      Block genesisBlock = new Block(null, people.get(0).getPublic());
       genesisBlock.finalize();
       
       BlockChain blockChain = new BlockChain(genesisBlock);
@@ -518,11 +539,11 @@ public class DropboxTestBlockChain {
       
       boolean passes = true;
       
-      Block block = new Block(genesisBlock.getHash(), people.get(1).getPublicKey());
+      Block block = new Block(genesisBlock.getHash(), people.get(1).getPublic());
       Transaction spendCoinbaseTx = new Transaction();
       spendCoinbaseTx.addInput(genesisBlock.getCoinbase().getHash(), 0);
-      spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublicKey());
-      spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+      spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublic());
+      spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
       spendCoinbaseTx.finalize();
       block.addTransaction(spendCoinbaseTx);
       block.finalize();
@@ -532,11 +553,11 @@ public class DropboxTestBlockChain {
       Block prevBlock = block;
       Transaction retainTx = spendCoinbaseTx;
       
-      block = new Block(prevBlock.getHash(), people.get(2).getPublicKey());
+      block = new Block(prevBlock.getHash(), people.get(2).getPublic());
       spendCoinbaseTx = new Transaction();
       spendCoinbaseTx.addInput(prevBlock.getCoinbase().getHash(), 0);
-      spendCoinbaseTx.addOutput(Block.COINBASE, people.get(2).getPublicKey());
-      spendCoinbaseTx.addSignature(people.get(1).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+      spendCoinbaseTx.addOutput(Block.COINBASE, people.get(2).getPublic());
+      spendCoinbaseTx.addSignature(signTx(people.get(1), spendCoinbaseTx.getRawDataToSign(0)), 0);
       spendCoinbaseTx.finalize();
       block.addTransaction(spendCoinbaseTx);
       block.finalize();
@@ -546,11 +567,11 @@ public class DropboxTestBlockChain {
       Block prevPrevBlock = prevBlock;
       prevBlock = block;
       
-      block = new Block(prevBlock.getHash(), people.get(3).getPublicKey());
+      block = new Block(prevBlock.getHash(), people.get(3).getPublic());
       Transaction spendOldUTXOTransaction = new Transaction();
       spendOldUTXOTransaction.addInput(retainTx.getHash(), 0);
-      spendOldUTXOTransaction.addOutput(Block.COINBASE, people.get(2).getPublicKey());
-      spendOldUTXOTransaction.addSignature(people.get(1).getPrivateKey().sign(spendOldUTXOTransaction.getRawDataToSign(0)), 0);
+      spendOldUTXOTransaction.addOutput(Block.COINBASE, people.get(2).getPublic());
+      spendOldUTXOTransaction.addSignature(signTx(people.get(1), spendCoinbaseTx.getRawDataToSign(0)), 0);
       spendOldUTXOTransaction.finalize();
       block.addTransaction(spendOldUTXOTransaction);
       block.finalize();
@@ -563,7 +584,7 @@ public class DropboxTestBlockChain {
    public int test8() {
       System.out.println("Process a linear chain of blocks");
       
-      Block genesisBlock = new Block(null, people.get(0).getPublicKey());
+      Block genesisBlock = new Block(null, people.get(0).getPublic());
       genesisBlock.finalize();
       
       BlockChain blockChain = new BlockChain(genesisBlock);
@@ -575,11 +596,11 @@ public class DropboxTestBlockChain {
       Transaction spendCoinbaseTx;
       
       for (int i = 0; i < 100; i++) {
-         block = new Block(prevBlock.getHash(), people.get(0).getPublicKey());
+         block = new Block(prevBlock.getHash(), people.get(0).getPublic());
          spendCoinbaseTx = new Transaction();
          spendCoinbaseTx.addInput(prevBlock.getCoinbase().getHash(), 0);
-         spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublicKey());
-         spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+         spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublic());
+         spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
          spendCoinbaseTx.finalize();
          block.addTransaction(spendCoinbaseTx);
          block.finalize();
@@ -594,7 +615,7 @@ public class DropboxTestBlockChain {
    public int test9() {
       System.out.println("Process a linear chain of blocks of length CUT_OFF_AGE and then a block on top of the genesis block");
       
-      Block genesisBlock = new Block(null, people.get(0).getPublicKey());
+      Block genesisBlock = new Block(null, people.get(0).getPublic());
       genesisBlock.finalize();
       
       BlockChain blockChain = new BlockChain(genesisBlock);
@@ -606,11 +627,11 @@ public class DropboxTestBlockChain {
       Transaction spendCoinbaseTx;
       
       for (int i = 0; i < BlockChain.CUT_OFF_AGE; i++) {
-         block = new Block(prevBlock.getHash(), people.get(0).getPublicKey());
+         block = new Block(prevBlock.getHash(), people.get(0).getPublic());
          spendCoinbaseTx = new Transaction();
          spendCoinbaseTx.addInput(prevBlock.getCoinbase().getHash(), 0);
-         spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublicKey());
-         spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+         spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublic());
+         spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
          spendCoinbaseTx.finalize();
          block.addTransaction(spendCoinbaseTx);
          block.finalize();
@@ -619,7 +640,7 @@ public class DropboxTestBlockChain {
          passes = passes && blockHandler.processBlock(block);
       }
       
-      block = new Block(genesisBlock.getHash(), people.get(0).getPublicKey());
+      block = new Block(genesisBlock.getHash(), people.get(0).getPublic());
       block.finalize();
       
       passes = passes && blockHandler.processBlock(block);
@@ -630,7 +651,7 @@ public class DropboxTestBlockChain {
    public int test10() {
       System.out.println("Process a linear chain of blocks of length CUT_OFF_AGE + 1 and then a block on top of the genesis block");
       
-      Block genesisBlock = new Block(null, people.get(0).getPublicKey());
+      Block genesisBlock = new Block(null, people.get(0).getPublic());
       genesisBlock.finalize();
       
       BlockChain blockChain = new BlockChain(genesisBlock);
@@ -642,11 +663,11 @@ public class DropboxTestBlockChain {
       Transaction spendCoinbaseTx;
       
       for (int i = 0; i < BlockChain.CUT_OFF_AGE + 1; i++) {
-         block = new Block(prevBlock.getHash(), people.get(0).getPublicKey());
+         block = new Block(prevBlock.getHash(), people.get(0).getPublic());
          spendCoinbaseTx = new Transaction();
          spendCoinbaseTx.addInput(prevBlock.getCoinbase().getHash(), 0);
-         spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublicKey());
-         spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+         spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublic());
+         spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
          spendCoinbaseTx.finalize();
          block.addTransaction(spendCoinbaseTx);
          block.finalize();
@@ -655,7 +676,7 @@ public class DropboxTestBlockChain {
          passes = passes && blockHandler.processBlock(block);
       }
       
-      block = new Block(genesisBlock.getHash(), people.get(0).getPublicKey());
+      block = new Block(genesisBlock.getHash(), people.get(0).getPublic());
       block.finalize();
       
       passes = passes && !blockHandler.processBlock(block);
@@ -666,20 +687,20 @@ public class DropboxTestBlockChain {
    public int test11() {
       System.out.println("Create a block when no transactions have been processed");
       
-      Block genesisBlock = new Block(null, people.get(0).getPublicKey());
+      Block genesisBlock = new Block(null, people.get(0).getPublic());
       genesisBlock.finalize();
       
       BlockChain blockChain = new BlockChain(genesisBlock);
       BlockHandler blockHandler = new BlockHandler(blockChain);
       
-      Block createdBlock = blockHandler.createBlock(people.get(1).getPublicKey());
+      Block createdBlock = blockHandler.createBlock(people.get(1).getPublic());
       return UtilCOS.printPassFail(createdBlock != null && createdBlock.getPrevBlockHash().equals(genesisBlock.getHash()) && createdBlock.getTransactions().size() == 0);
    }
    
    public int test12() {
       System.out.println("Create a block after a single valid transaction has been processed");
       
-      Block genesisBlock = new Block(null, people.get(0).getPublicKey());
+      Block genesisBlock = new Block(null, people.get(0).getPublic());
       genesisBlock.finalize();
       
       BlockChain blockChain = new BlockChain(genesisBlock);
@@ -687,19 +708,19 @@ public class DropboxTestBlockChain {
       
       Transaction spendCoinbaseTx = new Transaction();
       spendCoinbaseTx.addInput(genesisBlock.getCoinbase().getHash(), 0);
-      spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublicKey());
-      spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+      spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublic());
+      spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
       spendCoinbaseTx.finalize();
       blockHandler.processTx(spendCoinbaseTx);
       
-      Block createdBlock = blockHandler.createBlock(people.get(1).getPublicKey());
+      Block createdBlock = blockHandler.createBlock(people.get(1).getPublic());
       return UtilCOS.printPassFail(createdBlock != null && createdBlock.getPrevBlockHash().equals(genesisBlock.getHash()) && createdBlock.getTransactions().size() == 1 && createdBlock.getTransaction(0).equals(spendCoinbaseTx));
    }
    
    public int test22() {
       System.out.println("Create a block after a valid transaction has been processed, then create a second block");
       
-      Block genesisBlock = new Block(null, people.get(0).getPublicKey());
+      Block genesisBlock = new Block(null, people.get(0).getPublic());
       genesisBlock.finalize();
       
       BlockChain blockChain = new BlockChain(genesisBlock);
@@ -707,13 +728,13 @@ public class DropboxTestBlockChain {
       
       Transaction spendCoinbaseTx = new Transaction();
       spendCoinbaseTx.addInput(genesisBlock.getCoinbase().getHash(), 0);
-      spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublicKey());
-      spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+      spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublic());
+      spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
       spendCoinbaseTx.finalize();
       blockHandler.processTx(spendCoinbaseTx);
       
-      Block createdBlock = blockHandler.createBlock(people.get(1).getPublicKey());
-      Block createdBlock2 = blockHandler.createBlock(people.get(2).getPublicKey());
+      Block createdBlock = blockHandler.createBlock(people.get(1).getPublic());
+      Block createdBlock2 = blockHandler.createBlock(people.get(2).getPublic());
       
       return UtilCOS.printPassFail(createdBlock != null && createdBlock.getPrevBlockHash().equals(genesisBlock.getHash()) && createdBlock.getTransactions().size() == 1 && createdBlock.getTransaction(0).equals(spendCoinbaseTx) && createdBlock2 != null && createdBlock2.getPrevBlockHash().equals(createdBlock.getHash()) && createdBlock2.getTransactions().size() == 0);
    }
@@ -721,7 +742,7 @@ public class DropboxTestBlockChain {
    public int test19() {
       System.out.println("Create a block after a valid transaction has been processed that is already in a block in the longest valid branch");
       
-      Block genesisBlock = new Block(null, people.get(0).getPublicKey());
+      Block genesisBlock = new Block(null, people.get(0).getPublic());
       genesisBlock.finalize();
       
       BlockChain blockChain = new BlockChain(genesisBlock);
@@ -729,12 +750,12 @@ public class DropboxTestBlockChain {
       
       boolean passes = true;
       
-      Block block = new Block(genesisBlock.getHash(), people.get(1).getPublicKey());
+      Block block = new Block(genesisBlock.getHash(), people.get(1).getPublic());
       
       Transaction spendCoinbaseTx = new Transaction();
       spendCoinbaseTx.addInput(genesisBlock.getCoinbase().getHash(), 0);
-      spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublicKey());
-      spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+      spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublic());
+      spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
       spendCoinbaseTx.finalize();
       block.addTransaction(spendCoinbaseTx);
       block.finalize();
@@ -742,7 +763,7 @@ public class DropboxTestBlockChain {
       passes = passes && blockHandler.processBlock(block);
       
       blockHandler.processTx(spendCoinbaseTx);
-      Block createdBlock = blockHandler.createBlock(people.get(1).getPublicKey());
+      Block createdBlock = blockHandler.createBlock(people.get(1).getPublic());
       
       return UtilCOS.printPassFail(passes && createdBlock != null && createdBlock.getPrevBlockHash().equals(block.getHash()) && createdBlock.getTransactions().size() == 0);
    }
@@ -750,7 +771,7 @@ public class DropboxTestBlockChain {
    public int test20() {
       System.out.println("Create a block after a valid transaction has been processed that uses a UTXO already claimed by a transaction in the longest valid branch");
       
-      Block genesisBlock = new Block(null, people.get(0).getPublicKey());
+      Block genesisBlock = new Block(null, people.get(0).getPublic());
       genesisBlock.finalize();
       
       BlockChain blockChain = new BlockChain(genesisBlock);
@@ -758,12 +779,12 @@ public class DropboxTestBlockChain {
       
       boolean passes = true;
       
-      Block block = new Block(genesisBlock.getHash(), people.get(1).getPublicKey());
+      Block block = new Block(genesisBlock.getHash(), people.get(1).getPublic());
       
       Transaction spendCoinbaseTx = new Transaction();
       spendCoinbaseTx.addInput(genesisBlock.getCoinbase().getHash(), 0);
-      spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublicKey());
-      spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+      spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublic());
+      spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
       spendCoinbaseTx.finalize();
       block.addTransaction(spendCoinbaseTx);
       block.finalize();
@@ -772,12 +793,12 @@ public class DropboxTestBlockChain {
       
       Transaction spendCoinbaseTx2 = new Transaction();
       spendCoinbaseTx2.addInput(genesisBlock.getCoinbase().getHash(), 0);
-      spendCoinbaseTx2.addOutput(Block.COINBASE - 1, people.get(1).getPublicKey());
-      spendCoinbaseTx2.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx2.getRawDataToSign(0)), 0);
+      spendCoinbaseTx2.addOutput(Block.COINBASE - 1, people.get(1).getPublic());
+      spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
       spendCoinbaseTx2.finalize();
       
       blockHandler.processTx(spendCoinbaseTx2);
-      Block createdBlock = blockHandler.createBlock(people.get(1).getPublicKey());
+      Block createdBlock = blockHandler.createBlock(people.get(1).getPublic());
       
       return UtilCOS.printPassFail(passes && createdBlock != null && createdBlock.getPrevBlockHash().equals(block.getHash()) && createdBlock.getTransactions().size() == 0);
    }
@@ -785,7 +806,7 @@ public class DropboxTestBlockChain {
    public int test21() {
       System.out.println("Create a block after a valid transaction has been processed that is not a double spend on the longest valid branch and has not yet been included in any other block");
       
-      Block genesisBlock = new Block(null, people.get(0).getPublicKey());
+      Block genesisBlock = new Block(null, people.get(0).getPublic());
       genesisBlock.finalize();
       
       BlockChain blockChain = new BlockChain(genesisBlock);
@@ -793,12 +814,12 @@ public class DropboxTestBlockChain {
       
       boolean passes = true;
       
-      Block block = new Block(genesisBlock.getHash(), people.get(1).getPublicKey());
+      Block block = new Block(genesisBlock.getHash(), people.get(1).getPublic());
       
       Transaction spendCoinbaseTx = new Transaction();
       spendCoinbaseTx.addInput(genesisBlock.getCoinbase().getHash(), 0);
-      spendCoinbaseTx.addOutput(Block.COINBASE - 1, people.get(1).getPublicKey());
-      spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+      spendCoinbaseTx.addOutput(Block.COINBASE - 1, people.get(1).getPublic());
+      spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
       spendCoinbaseTx.finalize();
       block.addTransaction(spendCoinbaseTx);
       block.finalize();
@@ -807,12 +828,12 @@ public class DropboxTestBlockChain {
       
       Transaction spendPrevTx = new Transaction();
       spendPrevTx.addInput(block.getCoinbase().getHash(), 0);
-      spendPrevTx.addOutput(Block.COINBASE, people.get(1).getPublicKey());
-      spendPrevTx.addSignature(people.get(1).getPrivateKey().sign(spendPrevTx.getRawDataToSign(0)), 0);
+      spendPrevTx.addOutput(Block.COINBASE, people.get(1).getPublic());
+      spendPrevTx.addSignature(signTx(people.get(1), spendPrevTx.getRawDataToSign(0)), 0);
       spendPrevTx.finalize();
       
       blockHandler.processTx(spendPrevTx);
-      Block createdBlock = blockHandler.createBlock(people.get(1).getPublicKey());
+      Block createdBlock = blockHandler.createBlock(people.get(1).getPublic());
       
       return UtilCOS.printPassFail(passes && createdBlock != null && createdBlock.getPrevBlockHash().equals(block.getHash()) && createdBlock.getTransactions().size() == 1 && createdBlock.getTransaction(0).equals(spendPrevTx));
    }
@@ -820,7 +841,7 @@ public class DropboxTestBlockChain {
    public int test13() {
       System.out.println("Create a block after only invalid transactions have been processed");
       
-      Block genesisBlock = new Block(null, people.get(0).getPublicKey());
+      Block genesisBlock = new Block(null, people.get(0).getPublic());
       genesisBlock.finalize();
       
       BlockChain blockChain = new BlockChain(genesisBlock);
@@ -828,19 +849,19 @@ public class DropboxTestBlockChain {
       
       Transaction spendCoinbaseTx = new Transaction();
       spendCoinbaseTx.addInput(genesisBlock.getCoinbase().getHash(), 0);
-      spendCoinbaseTx.addOutput(Block.COINBASE + 2, people.get(1).getPublicKey());
-      spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+      spendCoinbaseTx.addOutput(Block.COINBASE + 2, people.get(1).getPublic());
+      spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
       spendCoinbaseTx.finalize();
       blockHandler.processTx(spendCoinbaseTx);
       
-      Block createdBlock = blockHandler.createBlock(people.get(1).getPublicKey());
+      Block createdBlock = blockHandler.createBlock(people.get(1).getPublic());
       return UtilCOS.printPassFail(createdBlock != null && createdBlock.getPrevBlockHash().equals(genesisBlock.getHash()) && createdBlock.getTransactions().size() == 0);
    }
    
    public int test23() {
       System.out.println("Process a transaction, create a block, process a transaction, create a block, ...");
       
-      Block genesisBlock = new Block(null, people.get(0).getPublicKey());
+      Block genesisBlock = new Block(null, people.get(0).getPublic());
       genesisBlock.finalize();
       
       BlockChain blockChain = new BlockChain(genesisBlock);
@@ -853,12 +874,12 @@ public class DropboxTestBlockChain {
       for (int i = 0; i < 20; i++) {
          spendCoinbaseTx = new Transaction();
          spendCoinbaseTx.addInput(prevBlock.getCoinbase().getHash(), 0);
-         spendCoinbaseTx.addOutput(Block.COINBASE, people.get(0).getPublicKey());
-         spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+         spendCoinbaseTx.addOutput(Block.COINBASE, people.get(0).getPublic());
+         spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
          spendCoinbaseTx.finalize();
          blockHandler.processTx(spendCoinbaseTx);
          
-         Block createdBlock = blockHandler.createBlock(people.get(0).getPublicKey());
+         Block createdBlock = blockHandler.createBlock(people.get(0).getPublic());
          
          passes = passes && createdBlock != null && createdBlock.getPrevBlockHash().equals(prevBlock.getHash()) && createdBlock.getTransactions().size() == 1 && createdBlock.getTransaction(0).equals(spendCoinbaseTx);
          prevBlock = createdBlock;
@@ -869,7 +890,7 @@ public class DropboxTestBlockChain {
    public int test24() {
       System.out.println("Process a transaction, create a block, then process a block on top of that block with a transaction claiming a UTXO from that transaction");
       
-      Block genesisBlock = new Block(null, people.get(0).getPublicKey());
+      Block genesisBlock = new Block(null, people.get(0).getPublic());
       genesisBlock.finalize();
       
       BlockChain blockChain = new BlockChain(genesisBlock);
@@ -877,18 +898,18 @@ public class DropboxTestBlockChain {
       
       Transaction spendCoinbaseTx = new Transaction();
       spendCoinbaseTx.addInput(genesisBlock.getCoinbase().getHash(), 0);
-      spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublicKey());
-      spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+      spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublic());
+      spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
       spendCoinbaseTx.finalize();
       blockHandler.processTx(spendCoinbaseTx);
       
-      Block createdBlock = blockHandler.createBlock(people.get(1).getPublicKey());
+      Block createdBlock = blockHandler.createBlock(people.get(1).getPublic());
       
-      Block newBlock = new Block(createdBlock.getHash(), people.get(1).getPublicKey());
+      Block newBlock = new Block(createdBlock.getHash(), people.get(1).getPublic());
       Transaction spendTx = new Transaction();
       spendTx.addInput(spendCoinbaseTx.getHash(), 0);
-      spendTx.addOutput(Block.COINBASE, people.get(2).getPublicKey());
-      spendTx.addSignature(people.get(1).getPrivateKey().sign(spendTx.getRawDataToSign(0)), 0);
+      spendTx.addOutput(Block.COINBASE, people.get(2).getPublic());
+      spendTx.addSignature(signTx(people.get(1), spendTx.getRawDataToSign(0)), 0);
       spendTx.finalize();
       newBlock.addTransaction(spendTx);
       newBlock.finalize();
@@ -900,7 +921,7 @@ public class DropboxTestBlockChain {
    public int test25() {
       System.out.println("Process a transaction, create a block, then process a block on top of the genesis block with a transaction claiming a UTXO from that transaction");
       
-      Block genesisBlock = new Block(null, people.get(0).getPublicKey());
+      Block genesisBlock = new Block(null, people.get(0).getPublic());
       genesisBlock.finalize();
       
       BlockChain blockChain = new BlockChain(genesisBlock);
@@ -908,18 +929,18 @@ public class DropboxTestBlockChain {
       
       Transaction spendCoinbaseTx = new Transaction();
       spendCoinbaseTx.addInput(genesisBlock.getCoinbase().getHash(), 0);
-      spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublicKey());
-      spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+      spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublic());
+      spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
       spendCoinbaseTx.finalize();
       blockHandler.processTx(spendCoinbaseTx);
       
-      Block createdBlock = blockHandler.createBlock(people.get(1).getPublicKey());
+      Block createdBlock = blockHandler.createBlock(people.get(1).getPublic());
       
-      Block newBlock = new Block(genesisBlock.getHash(), people.get(1).getPublicKey());
+      Block newBlock = new Block(genesisBlock.getHash(), people.get(1).getPublic());
       Transaction spendTx = new Transaction();
       spendTx.addInput(spendCoinbaseTx.getHash(), 0);
-      spendTx.addOutput(Block.COINBASE, people.get(2).getPublicKey());
-      spendTx.addSignature(people.get(1).getPrivateKey().sign(spendTx.getRawDataToSign(0)), 0);
+      spendTx.addOutput(Block.COINBASE, people.get(2).getPublic());
+      spendTx.addSignature(signTx(people.get(1), spendTx.getRawDataToSign(0)), 0);
       spendTx.finalize();
       newBlock.addTransaction(spendTx);
       newBlock.finalize();
@@ -930,7 +951,7 @@ public class DropboxTestBlockChain {
    public int test18() {
       System.out.println("Process multiple blocks directly on top of the genesis block, then create a block");
       
-      Block genesisBlock = new Block(null, people.get(0).getPublicKey());
+      Block genesisBlock = new Block(null, people.get(0).getPublic());
       genesisBlock.finalize();
       
       BlockChain blockChain = new BlockChain(genesisBlock);
@@ -942,21 +963,21 @@ public class DropboxTestBlockChain {
       Transaction spendCoinbaseTx;
       
       for (int i = 0; i < 100; i++) {
-         block = new Block(genesisBlock.getHash(), people.get(1).getPublicKey());
+         block = new Block(genesisBlock.getHash(), people.get(1).getPublic());
          if (i == 0)
             firstBlock = block;
          
          spendCoinbaseTx = new Transaction();
          spendCoinbaseTx.addInput(genesisBlock.getCoinbase().getHash(), 0);
-         spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublicKey());
-         spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+         spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublic());
+         spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
          spendCoinbaseTx.finalize();
          block.addTransaction(spendCoinbaseTx);
          block.finalize();
          passes = passes && blockHandler.processBlock(block);
       }
 
-      Block createdBlock = blockHandler.createBlock(people.get(1).getPublicKey());
+      Block createdBlock = blockHandler.createBlock(people.get(1).getPublic());
       
       return UtilCOS.printPassFail(createdBlock != null && createdBlock.getPrevBlockHash().equals(firstBlock.getHash()) && createdBlock.getTransactions().size() == 0);
    }
@@ -964,7 +985,7 @@ public class DropboxTestBlockChain {
    public int test26() {
       System.out.println("Construct two branches of approximately equal size, ensuring that blocks are always created on the proper branch");
       
-      Block genesisBlock = new Block(null, people.get(0).getPublicKey());
+      Block genesisBlock = new Block(null, people.get(0).getPublic());
       genesisBlock.finalize();
       
       BlockChain blockChain = new BlockChain(genesisBlock);
@@ -982,23 +1003,23 @@ public class DropboxTestBlockChain {
          if (i % 2 == 0) {
             if (!flipped) {
                spendCoinbaseTx.addInput(firstBranchPrevBlock.getCoinbase().getHash(), 0);
-               spendCoinbaseTx.addOutput(Block.COINBASE, people.get(0).getPublicKey());
-               spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+               spendCoinbaseTx.addOutput(Block.COINBASE, people.get(0).getPublic());
+               spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
                spendCoinbaseTx.finalize();
                blockHandler.processTx(spendCoinbaseTx);
                
-               block = blockHandler.createBlock(people.get(0).getPublicKey());
+               block = blockHandler.createBlock(people.get(0).getPublic());
                
                passes = passes && block != null && block.getPrevBlockHash().equals(firstBranchPrevBlock.getHash()) && block.getTransactions().size() == 1 && block.getTransaction(0).equals(spendCoinbaseTx);
                firstBranchPrevBlock = block;
             } else {
                spendCoinbaseTx.addInput(secondBranchPrevBlock.getCoinbase().getHash(), 0);
-               spendCoinbaseTx.addOutput(Block.COINBASE, people.get(0).getPublicKey());
-               spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+               spendCoinbaseTx.addOutput(Block.COINBASE, people.get(0).getPublic());
+               spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
                spendCoinbaseTx.finalize();
                blockHandler.processTx(spendCoinbaseTx);
                
-               block = blockHandler.createBlock(people.get(0).getPublicKey());
+               block = blockHandler.createBlock(people.get(0).getPublic());
                
                passes = passes && block != null && block.getPrevBlockHash().equals(secondBranchPrevBlock.getHash()) && block.getTransactions().size() == 1 && block.getTransaction(0).equals(spendCoinbaseTx);
                secondBranchPrevBlock = block;
@@ -1006,11 +1027,11 @@ public class DropboxTestBlockChain {
          } else {
             if (!flipped) {
                // add two blocks two second branch
-               block = new Block(secondBranchPrevBlock.getHash(), people.get(0).getPublicKey());
+               block = new Block(secondBranchPrevBlock.getHash(), people.get(0).getPublic());
                spendCoinbaseTx = new Transaction();
                spendCoinbaseTx.addInput(secondBranchPrevBlock.getCoinbase().getHash(), 0);
-               spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublicKey());
-               spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+               spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublic());
+               spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
                spendCoinbaseTx.finalize();
                block.addTransaction(spendCoinbaseTx);
                block.finalize();
@@ -1018,11 +1039,11 @@ public class DropboxTestBlockChain {
                passes = passes && blockHandler.processBlock(block);
                secondBranchPrevBlock = block;
                
-               block = new Block(secondBranchPrevBlock.getHash(), people.get(0).getPublicKey());
+               block = new Block(secondBranchPrevBlock.getHash(), people.get(0).getPublic());
                spendCoinbaseTx = new Transaction();
                spendCoinbaseTx.addInput(secondBranchPrevBlock.getCoinbase().getHash(), 0);
-               spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublicKey());
-               spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+               spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublic());
+               spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
                spendCoinbaseTx.finalize();
                block.addTransaction(spendCoinbaseTx);
                block.finalize();
@@ -1031,11 +1052,11 @@ public class DropboxTestBlockChain {
                secondBranchPrevBlock = block;
                
                if (i > 1) {
-                  block = new Block(secondBranchPrevBlock.getHash(), people.get(0).getPublicKey());
+                  block = new Block(secondBranchPrevBlock.getHash(), people.get(0).getPublic());
                   spendCoinbaseTx = new Transaction();
                   spendCoinbaseTx.addInput(secondBranchPrevBlock.getCoinbase().getHash(), 0);
-                  spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublicKey());
-                  spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+                  spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublic());
+                  spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
                   spendCoinbaseTx.finalize();
                   block.addTransaction(spendCoinbaseTx);
                   block.finalize();
@@ -1044,11 +1065,11 @@ public class DropboxTestBlockChain {
                   secondBranchPrevBlock = block;
                }
             } else {
-               block = new Block(firstBranchPrevBlock.getHash(), people.get(0).getPublicKey());
+               block = new Block(firstBranchPrevBlock.getHash(), people.get(0).getPublic());
                spendCoinbaseTx = new Transaction();
                spendCoinbaseTx.addInput(firstBranchPrevBlock.getCoinbase().getHash(), 0);
-               spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublicKey());
-               spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+               spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublic());
+               spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
                spendCoinbaseTx.finalize();
                block.addTransaction(spendCoinbaseTx);
                block.finalize();
@@ -1056,11 +1077,11 @@ public class DropboxTestBlockChain {
                passes = passes && blockHandler.processBlock(block);
                firstBranchPrevBlock = block;
                
-               block = new Block(firstBranchPrevBlock.getHash(), people.get(0).getPublicKey());
+               block = new Block(firstBranchPrevBlock.getHash(), people.get(0).getPublic());
                spendCoinbaseTx = new Transaction();
                spendCoinbaseTx.addInput(firstBranchPrevBlock.getCoinbase().getHash(), 0);
-               spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublicKey());
-               spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+               spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublic());
+               spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
                spendCoinbaseTx.finalize();
                block.addTransaction(spendCoinbaseTx);
                block.finalize();
@@ -1069,11 +1090,11 @@ public class DropboxTestBlockChain {
                firstBranchPrevBlock = block;
                
                if (i > 1) {
-                  block = new Block(firstBranchPrevBlock.getHash(), people.get(0).getPublicKey());
+                  block = new Block(firstBranchPrevBlock.getHash(), people.get(0).getPublic());
                   spendCoinbaseTx = new Transaction();
                   spendCoinbaseTx.addInput(firstBranchPrevBlock.getCoinbase().getHash(), 0);
-                  spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublicKey());
-                  spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+                  spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublic());
+                  spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
                   spendCoinbaseTx.finalize();
                   block.addTransaction(spendCoinbaseTx);
                   block.finalize();
@@ -1105,7 +1126,7 @@ public class DropboxTestBlockChain {
    public int test27() {
       System.out.println("Similar to previous test, but then try to process blocks whose parents are at height < maxHeight - CUT_OFF_AGE");
       
-      Block genesisBlock = new Block(null, people.get(0).getPublicKey());
+      Block genesisBlock = new Block(null, people.get(0).getPublic());
       genesisBlock.finalize();
       
       BlockChain blockChain = new BlockChain(genesisBlock);
@@ -1127,12 +1148,12 @@ public class DropboxTestBlockChain {
          if (i % 2 == 0) {
             if (!flipped) {
                spendCoinbaseTx.addInput(firstBranchPrevBlock.getCoinbase().getHash(), 0);
-               spendCoinbaseTx.addOutput(Block.COINBASE, people.get(0).getPublicKey());
-               spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+               spendCoinbaseTx.addOutput(Block.COINBASE, people.get(0).getPublic());
+               spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
                spendCoinbaseTx.finalize();
                blockHandler.processTx(spendCoinbaseTx);
                
-               block = blockHandler.createBlock(people.get(0).getPublicKey());
+               block = blockHandler.createBlock(people.get(0).getPublic());
                
                passes = passes && block != null && block.getPrevBlockHash().equals(firstBranchPrevBlock.getHash()) && block.getTransactions().size() == 1 && block.getTransaction(0).equals(spendCoinbaseTx);
                ForwardBlockNode newNode = new ForwardBlockNode(block);
@@ -1141,12 +1162,12 @@ public class DropboxTestBlockChain {
                firstBranchPrevBlock = block;
             } else {
                spendCoinbaseTx.addInput(secondBranchPrevBlock.getCoinbase().getHash(), 0);
-               spendCoinbaseTx.addOutput(Block.COINBASE, people.get(0).getPublicKey());
-               spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+               spendCoinbaseTx.addOutput(Block.COINBASE, people.get(0).getPublic());
+               spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
                spendCoinbaseTx.finalize();
                blockHandler.processTx(spendCoinbaseTx);
                
-               block = blockHandler.createBlock(people.get(0).getPublicKey());
+               block = blockHandler.createBlock(people.get(0).getPublic());
                
                passes = passes && block != null && block.getPrevBlockHash().equals(secondBranchPrevBlock.getHash()) && block.getTransactions().size() == 1 && block.getTransaction(0).equals(spendCoinbaseTx);
                ForwardBlockNode newNode = new ForwardBlockNode(block);
@@ -1157,11 +1178,11 @@ public class DropboxTestBlockChain {
          } else {
             if (!flipped) {
                // add two blocks two second branch
-               block = new Block(secondBranchPrevBlock.getHash(), people.get(0).getPublicKey());
+               block = new Block(secondBranchPrevBlock.getHash(), people.get(0).getPublic());
                spendCoinbaseTx = new Transaction();
                spendCoinbaseTx.addInput(secondBranchPrevBlock.getCoinbase().getHash(), 0);
-               spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublicKey());
-               spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+               spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublic());
+               spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
                spendCoinbaseTx.finalize();
                block.addTransaction(spendCoinbaseTx);
                block.finalize();
@@ -1172,11 +1193,11 @@ public class DropboxTestBlockChain {
                secondBranchTracker = newNode;
                secondBranchPrevBlock = block;
                
-               block = new Block(secondBranchPrevBlock.getHash(), people.get(0).getPublicKey());
+               block = new Block(secondBranchPrevBlock.getHash(), people.get(0).getPublic());
                spendCoinbaseTx = new Transaction();
                spendCoinbaseTx.addInput(secondBranchPrevBlock.getCoinbase().getHash(), 0);
-               spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublicKey());
-               spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+               spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublic());
+               spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
                spendCoinbaseTx.finalize();
                block.addTransaction(spendCoinbaseTx);
                block.finalize();
@@ -1188,11 +1209,11 @@ public class DropboxTestBlockChain {
                secondBranchPrevBlock = block;
                
                if (i > 1) {
-                  block = new Block(secondBranchPrevBlock.getHash(), people.get(0).getPublicKey());
+                  block = new Block(secondBranchPrevBlock.getHash(), people.get(0).getPublic());
                   spendCoinbaseTx = new Transaction();
                   spendCoinbaseTx.addInput(secondBranchPrevBlock.getCoinbase().getHash(), 0);
-                  spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublicKey());
-                  spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+                  spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublic());
+                  spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
                   spendCoinbaseTx.finalize();
                   block.addTransaction(spendCoinbaseTx);
                   block.finalize();
@@ -1204,11 +1225,11 @@ public class DropboxTestBlockChain {
                   secondBranchPrevBlock = block;
                }
             } else {
-               block = new Block(firstBranchPrevBlock.getHash(), people.get(0).getPublicKey());
+               block = new Block(firstBranchPrevBlock.getHash(), people.get(0).getPublic());
                spendCoinbaseTx = new Transaction();
                spendCoinbaseTx.addInput(firstBranchPrevBlock.getCoinbase().getHash(), 0);
-               spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublicKey());
-               spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+               spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublic());
+               spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
                spendCoinbaseTx.finalize();
                block.addTransaction(spendCoinbaseTx);
                block.finalize();
@@ -1219,11 +1240,11 @@ public class DropboxTestBlockChain {
                firstBranchTracker = newNode;
                firstBranchPrevBlock = block;
                
-               block = new Block(firstBranchPrevBlock.getHash(), people.get(0).getPublicKey());
+               block = new Block(firstBranchPrevBlock.getHash(), people.get(0).getPublic());
                spendCoinbaseTx = new Transaction();
                spendCoinbaseTx.addInput(firstBranchPrevBlock.getCoinbase().getHash(), 0);
-               spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublicKey());
-               spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+               spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublic());
+               spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
                spendCoinbaseTx.finalize();
                block.addTransaction(spendCoinbaseTx);
                block.finalize();
@@ -1235,11 +1256,11 @@ public class DropboxTestBlockChain {
                firstBranchPrevBlock = block;
                
                if (i > 1) {
-                  block = new Block(firstBranchPrevBlock.getHash(), people.get(0).getPublicKey());
+                  block = new Block(firstBranchPrevBlock.getHash(), people.get(0).getPublic());
                   spendCoinbaseTx = new Transaction();
                   spendCoinbaseTx.addInput(firstBranchPrevBlock.getCoinbase().getHash(), 0);
-                  spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublicKey());
-                  spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+                  spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublic());
+                  spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
                   spendCoinbaseTx.finalize();
                   block.addTransaction(spendCoinbaseTx);
                   block.finalize();
@@ -1274,11 +1295,11 @@ public class DropboxTestBlockChain {
       int firstBranchCount = 0;
       firstBranchTracker = firstBranch;
       while (firstBranchTracker.child != null) {
-         block = new Block(firstBranchTracker.b.getHash(), people.get(0).getPublicKey());
+         block = new Block(firstBranchTracker.b.getHash(), people.get(0).getPublic());
          spendCoinbaseTx = new Transaction();
          spendCoinbaseTx.addInput(firstBranchTracker.b.getCoinbase().getHash(), 0);
-         spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublicKey());
-         spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+         spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublic());
+         spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
          spendCoinbaseTx.finalize();
          block.addTransaction(spendCoinbaseTx);
          block.finalize();
@@ -1296,11 +1317,11 @@ public class DropboxTestBlockChain {
       int secondBranchCount = 0;
       secondBranchTracker = secondBranch;
       while (secondBranchTracker != null) {
-         block = new Block(secondBranchTracker.b.getHash(), people.get(0).getPublicKey());
+         block = new Block(secondBranchTracker.b.getHash(), people.get(0).getPublic());
          spendCoinbaseTx = new Transaction();
          spendCoinbaseTx.addInput(secondBranchTracker.b.getCoinbase().getHash(), 0);
-         spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublicKey());
-         spendCoinbaseTx.addSignature(people.get(0).getPrivateKey().sign(spendCoinbaseTx.getRawDataToSign(0)), 0);
+         spendCoinbaseTx.addOutput(Block.COINBASE, people.get(1).getPublic());
+         spendCoinbaseTx.addSignature(signTx(people.get(0), spendCoinbaseTx.getRawDataToSign(0)), 0);
          spendCoinbaseTx.finalize();
          block.addTransaction(spendCoinbaseTx);
          block.finalize();
@@ -1318,7 +1339,7 @@ public class DropboxTestBlockChain {
       return UtilCOS.printPassFail(passes);
    }
    
-   public static void main(String[] args) throws FileNotFoundException, IOException {
+   public static void main(String[] args) throws FileNotFoundException, IOException, NoSuchAlgorithmException {
       DropboxTestBlockChain tester = new DropboxTestBlockChain();
       
       int total = 0;

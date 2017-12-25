@@ -1,0 +1,22 @@
+apply plugin: 'java'
+apply plugin: 'eclipse'
+apply plugin: 'application'
+
+repositories {
+    jcenter()
+}
+
+// Define the main class for the application
+mainClassName = 'DropboxTestBlockChain'
+
+sourceSets {
+    main {
+        java {
+            srcDir '.'
+        }
+    }
+}
+
+dependencies {
+    compile files(fileTree(dir: 'grading', includes: ['*.jar']))
+}
