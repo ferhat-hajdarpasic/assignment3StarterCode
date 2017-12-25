@@ -6,7 +6,7 @@ public class BlockChain {
 
    private static final UTXOPool unspentTransactions = new UTXOPool();
    
-   private ArrayList<Link> nodes  = new ArrayList<Link>();
+   private ArrayList<Link> chain  = new ArrayList<Link>();
    private final HashMap<ByteArrayWrapper, Link> hashToNodeMap = new HashMap<ByteArrayWrapper, Link>();
    private final TransactionPool transactionsWaitingForNewBlock  = new TransactionPool();
    private int height;
@@ -19,7 +19,7 @@ public class BlockChain {
       Transaction coinbase = genesisBlock.getCoinbase();
       unspentTransactions.addUTXO(new UTXO(coinbase.getHash(), 0), coinbase.getOutput(0));
       Link genesis = new Link(genesisBlock, null, unspentTransactions);
-      nodes.add(genesis);
+      chain.add(genesis);
       hashToNodeMap.put(new ByteArrayWrapper(genesisBlock.getHash()), genesis);
       height = 1;
       maxHeightBlock = genesis;
@@ -87,15 +87,15 @@ public class BlockChain {
              maxHeightBlock = current;
              height = current.height;
           }
-          if (height - nodes.get(0).height > CUT_OFF_AGE) {
+          if (height - chain.get(0).height > CUT_OFF_AGE) {
             ArrayList<Link> newNodes = new ArrayList<Link>();
-            for (Link node : nodes) {
-              for (Link child : node.children) {
+            for (Link link : chain) {
+              for (Link child : link.children) {
                 newNodes.add(child);
               }
-              hashToNodeMap.remove(new ByteArrayWrapper(node.block.getHash()));
+              hashToNodeMap.remove(new ByteArrayWrapper(link.block.getHash()));
             }
-            nodes = newNodes;
+            chain = newNodes;
           }
           return true;  
         }       
