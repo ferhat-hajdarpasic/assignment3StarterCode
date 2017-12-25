@@ -1,318 +1,331 @@
+
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.security.PublicKey;
+import java.security.interfaces.RSAPublicKey;
+import java.util.ArrayList;
+import java.util.Arrays;
 
 public class Transaction {
 
-   public class Input {
-      public byte[] prevTxHash;   // hash of the Transaction whose output is being used
-      public int outputIndex;     // used output's index in the previous transaction 
-      public byte[] signature;    // the signature produced to check validity
+    public class Input {
+        /** hash of the Transaction whose output is being used */
+        public byte[] prevTxHash;
+        /** used output's index in the previous transaction */
+        public int outputIndex;
+        /** the signature produced to check validity */
+        public byte[] signature;
 
-      public Input(byte[] prevHash, int index) {
-         if (prevHash == null)
-            prevTxHash = null;
-         else
-            prevTxHash = Arrays.copyOf(prevHash, prevHash.length);
-         outputIndex = index;
-      }
-      public void addSignature(byte[] sig) {
-         if (sig == null)
-            signature = null;
-         else
-            signature = Arrays.copyOf(sig, sig.length);
-      }
-      public boolean equals(Object other) {
-         if (other == null) {
-            return false;
-         }
-         if (getClass() != other.getClass()) {
-            return false;
-         }
+        public Input(byte[] prevHash, int index) {
+            if (prevHash == null)
+                prevTxHash = null;
+            else
+                prevTxHash = Arrays.copyOf(prevHash, prevHash.length);
+            outputIndex = index;
+        }
 
-         Input in = (Input) other;
+        public void addSignature(byte[] sig) {
+            if (sig == null)
+                signature = null;
+            else
+                signature = Arrays.copyOf(sig, sig.length);
+        }
 
-         if (prevTxHash.length != in.prevTxHash.length)
-            return false;
-         for (int i = 0; i < prevTxHash.length; i++) {
-            if (prevTxHash[i] != in.prevTxHash[i])
-               return false;
-         }
-         if (outputIndex != in.outputIndex)
-            return false;
-         if (signature.length != in.signature.length)
-            return false;
-         for (int i = 0; i < signature.length; i++) {
-            if (signature[i] != in.signature[i])
-               return false;
-         }
-         return true;
-      }
+        public boolean equals(Object other) {
+            if (other == null) {
+                return false;
+            }
+            if (getClass() != other.getClass()) {
+                return false;
+            }
 
-      public int hashCode() {
-         int hash = 1;
-         hash = hash * 17 + Arrays.hashCode(prevTxHash);
-         hash = hash * 31 + outputIndex;
-         hash = hash * 31 + Arrays.hashCode(signature);
-         return hash;
-      }
-   }
+            Input in = (Input) other;
 
-   public class Output {
-      public double value;        // value in bitcoins of the output
-      public RSAKey address;      // the address or public key of the recipient
+            if (prevTxHash.length != in.prevTxHash.length)
+                return false;
+            for (int i = 0; i < prevTxHash.length; i++) {
+                if (prevTxHash[i] != in.prevTxHash[i])
+                    return false;
+            }
+            if (outputIndex != in.outputIndex)
+                return false;
+            if (signature.length != in.signature.length)
+                return false;
+            for (int i = 0; i < signature.length; i++) {
+                if (signature[i] != in.signature[i])
+                    return false;
+            }
+            return true;
+        }
 
-      public Output(double v, RSAKey addr) {
-         value = v;
-         address = addr;
-      }
-      public boolean equals(Object other) {
-         if (other == null) {
-            return false;
-         }
-         if (getClass() != other.getClass()) {
-            return false;
-         }
+        public int hashCode() {
+            int hash = 1;
+            hash = hash * 17 + Arrays.hashCode(prevTxHash);
+            hash = hash * 31 + outputIndex;
+            hash = hash * 31 + Arrays.hashCode(signature);
+            return hash;
+        }
+    }
 
-         Output op = (Output) other;
+    public class Output {
+        /** value in bitcoins of the output */
+        public double value;
+        /** the address or public key of the recipient */
+        public PublicKey address;
 
-         if (value != op.value)
-            return false;
-         if (!address.getExponent().equals(op.address.getExponent()))
-            return false;
-         if (!address.getModulus().equals(op.address.getModulus()))
-            return false;
-         return true;
-      }
+        public Output(double v, PublicKey addr) {
+            value = v;
+            address = addr;
+        }
 
-      public int hashCode() {
-         int hash = 1;
-         hash = hash * 17 + (int)value*10000;
-         hash = hash * 31 + address.getExponent().hashCode();
-         hash = hash * 31 + address.getModulus().hashCode();
-         return hash;
-      }
-   }
+        public boolean equals(Object other) {
+            if (other == null) {
+                return false;
+            }
+            if (getClass() != other.getClass()) {
+                return false;
+            }
 
-   private byte[] hash;    // hash of the transaction, its unique id
-   private ArrayList<Input> inputs;   // inputs
-   private ArrayList<Output> outputs; // outputs
-   private boolean coinbase;
+            Output op = (Output) other;
 
-   public Transaction() {
-      inputs = new ArrayList<Input>();
-      outputs = new ArrayList<Output>();
-      coinbase = false;
-   }
+            if (value != op.value)
+                return false;
+            if (!((RSAPublicKey) address).getPublicExponent().equals(
+                    ((RSAPublicKey) op.address).getPublicExponent()))
+                return false;
+            if (!((RSAPublicKey) address).getModulus().equals(
+                    ((RSAPublicKey) op.address).getModulus()))
+                return false;
+            return true;
+        }
 
-   public Transaction(Transaction tx) {
-      hash = tx.hash.clone();
-      inputs = new ArrayList<Input>(tx.inputs);
-      outputs = new ArrayList<Output>(tx.outputs);
-      coinbase = false;
-   }
+        public int hashCode() {
+            int hash = 1;
+            hash = hash * 17 + (int) value * 10000;
+            hash = hash * 31 + ((RSAPublicKey) address).getPublicExponent().hashCode();
+            hash = hash * 31 + ((RSAPublicKey) address).getModulus().hashCode();
+            return hash;
+        }
+    }
 
-   // create a coinbase transaction of value coin
-   // also calls finalize on it
-   public Transaction(double coin, RSAKey address) {
-      coinbase = true;
-      inputs = new ArrayList<Input>();
-      outputs = new ArrayList<Output>();
-      addOutput(coin, address);
-      finalize();
-   }
-   
-   public boolean isCoinbase() {
-      return coinbase;
-   }
-   
-   public void addInput(byte[] prevTxHash, int outputIndex) {
-      Input in = new Input(prevTxHash, outputIndex);
-      inputs.add(in);
-   }
+    /** hash of the transaction, its unique id */
+    private byte[] hash;
+    private ArrayList<Input> inputs;
+    private ArrayList<Output> outputs;
+    private boolean coinbase;
 
-   public void addOutput(double value, RSAKey address) {
-      Output op = new Output(value, address);
-      outputs.add(op);
-   }
+    public Transaction() {
+        inputs = new ArrayList<Input>();
+        outputs = new ArrayList<Output>();
+        coinbase = false;
+    }
 
-   public void removeInput(int index) {
-      inputs.remove(index);
-   }
+    public Transaction(Transaction tx) {
+        hash = tx.hash.clone();
+        inputs = new ArrayList<Input>(tx.inputs);
+        outputs = new ArrayList<Output>(tx.outputs);
+        coinbase = false;
+    }
 
-   public void removeInput(UTXO ut) {
-      for (int i = 0; i < inputs.size(); i++) {
-         Input in = inputs.get(i);
-         UTXO u = new UTXO(in.prevTxHash, in.outputIndex);
-         if (u.equals(ut)) {
-            inputs.remove(i);
-            return;
-         }
-      }
-   }
+    /** create a coinbase transaction of value {@code coin} and calls finalize on it */
+    public Transaction(double coin, PublicKey address) {
+        coinbase = true;
+        inputs = new ArrayList<Input>();
+        outputs = new ArrayList<Output>();
+        addOutput(coin, address);
+        finalize();
+    }
 
-   public byte[] getRawDataToSign(int index) {
-      // ith input and all outputs
-      ArrayList<Byte> sigData = new ArrayList<Byte>();
-      if (index > inputs.size()) 
-         return null;
-      Input in = inputs.get(index);
-      byte[] prevTxHash = in.prevTxHash;
-      ByteBuffer b = ByteBuffer.allocate(Integer.SIZE/8);
-      b.putInt(in.outputIndex);
-      byte[] outputIndex = b.array();
-      if (prevTxHash != null)
-         for (int i = 0; i < prevTxHash.length; i++)
-            sigData.add(prevTxHash[i]);
-      for (int i = 0; i < outputIndex.length; i++)
-         sigData.add(outputIndex[i]);
-      for (Output op : outputs) {
-         ByteBuffer bo = ByteBuffer.allocate(Double.SIZE/8);
-         bo.putDouble(op.value);
-         byte[] value = bo.array();
-         byte[] addressExponent = op.address.getExponent().toByteArray();
-         byte[] addressModulus = op.address.getModulus().toByteArray();
-         for (int i = 0; i < value.length; i++)
-            sigData.add(value[i]);
-         for (int i = 0; i < addressExponent.length; i++)
-            sigData.add(addressExponent[i]);
-         for (int i = 0; i < addressModulus.length; i++)
-            sigData.add(addressModulus[i]);
-      }
-      byte[] sigD = new byte[sigData.size()];
-      int i = 0;
-      for(Byte sb : sigData)
-         sigD[i++] = sb;
-      return sigD;
-   }
+    public boolean isCoinbase() {
+        return coinbase;
+    }
 
-   public void addSignature(byte[] signature, int index) {
-      inputs.get(index).addSignature(signature);
-   }
+    public void addInput(byte[] prevTxHash, int outputIndex) {
+        Input in = new Input(prevTxHash, outputIndex);
+        inputs.add(in);
+    }
 
-   public byte[] getRawTx() {
-      ArrayList<Byte> rawTx = new ArrayList<Byte>();
-      for (Input in : inputs) {
-         byte[] prevTxHash = in.prevTxHash;
-         ByteBuffer b = ByteBuffer.allocate(Integer.SIZE/8);
-         b.putInt(in.outputIndex);
-         byte[] outputIndex = b.array();
-         byte[] signature = in.signature;
-         if (prevTxHash != null)
+    public void addOutput(double value, PublicKey address) {
+        Output op = new Output(value, address);
+        outputs.add(op);
+    }
+
+    public void removeInput(int index) {
+        inputs.remove(index);
+    }
+
+    public void removeInput(UTXO ut) {
+        for (int i = 0; i < inputs.size(); i++) {
+            Input in = inputs.get(i);
+            UTXO u = new UTXO(in.prevTxHash, in.outputIndex);
+            if (u.equals(ut)) {
+                inputs.remove(i);
+                return;
+            }
+        }
+    }
+
+    public byte[] getRawDataToSign(int index) {
+        // ith input and all outputs
+        ArrayList<Byte> sigData = new ArrayList<Byte>();
+        if (index > inputs.size())
+            return null;
+        Input in = inputs.get(index);
+        byte[] prevTxHash = in.prevTxHash;
+        ByteBuffer b = ByteBuffer.allocate(Integer.SIZE / 8);
+        b.putInt(in.outputIndex);
+        byte[] outputIndex = b.array();
+        if (prevTxHash != null)
             for (int i = 0; i < prevTxHash.length; i++)
-               rawTx.add(prevTxHash[i]);
-         for (int i = 0; i < outputIndex.length; i++)
-            rawTx.add(outputIndex[i]);
-         if (signature != null)
-            for (int i = 0; i < signature.length; i++)
-               rawTx.add(signature[i]);
-      }
-      for (Output op : outputs) {
-         ByteBuffer b = ByteBuffer.allocate(Double.SIZE/8);
-         b.putDouble(op.value);
-         byte[] value = b.array();
-         byte[] addressExponent = op.address.getExponent().toByteArray();
-         byte[] addressModulus = op.address.getModulus().toByteArray();
-         for (int i = 0; i < value.length; i++)
-            rawTx.add(value[i]);
-         for (int i = 0; i < addressExponent.length; i++)
-            rawTx.add(addressExponent[i]);
-         for (int i = 0; i < addressModulus.length; i++)
-            rawTx.add(addressModulus[i]);
-      }
-      byte[] tx = new byte[rawTx.size()];
-      int i = 0;
-      for(Byte b : rawTx)
-         tx[i++] = b;
-      return tx;
-   }
+                sigData.add(prevTxHash[i]);
+        for (int i = 0; i < outputIndex.length; i++)
+            sigData.add(outputIndex[i]);
+        for (Output op : outputs) {
+            ByteBuffer bo = ByteBuffer.allocate(Double.SIZE / 8);
+            bo.putDouble(op.value);
+            byte[] value = bo.array();
+            byte[] addressExponent = ((RSAPublicKey) op.address).getPublicExponent().toByteArray();
+            byte[] addressModulus = ((RSAPublicKey) op.address).getModulus().toByteArray();
+            for (int i = 0; i < value.length; i++)
+                sigData.add(value[i]);
+            for (int i = 0; i < addressExponent.length; i++)
+                sigData.add(addressExponent[i]);
+            for (int i = 0; i < addressModulus.length; i++)
+                sigData.add(addressModulus[i]);
+        }
+        byte[] sigD = new byte[sigData.size()];
+        int i = 0;
+        for (Byte sb : sigData)
+            sigD[i++] = sb;
+        return sigD;
+    }
 
-   public void finalize() {
-      try {
-         MessageDigest md = MessageDigest.getInstance("SHA-256");
-         md.update(getRawTx());
-         hash = md.digest();
-      } catch(NoSuchAlgorithmException x) {
-         x.printStackTrace(System.err);
-      }
-   }
+    public void addSignature(byte[] signature, int index) {
+        inputs.get(index).addSignature(signature);
+    }
 
-   public void setHash(byte[] h) {
-      hash = h;
-   }
+    public byte[] getRawTx() {
+        ArrayList<Byte> rawTx = new ArrayList<Byte>();
+        for (Input in : inputs) {
+            byte[] prevTxHash = in.prevTxHash;
+            ByteBuffer b = ByteBuffer.allocate(Integer.SIZE / 8);
+            b.putInt(in.outputIndex);
+            byte[] outputIndex = b.array();
+            byte[] signature = in.signature;
+            if (prevTxHash != null)
+                for (int i = 0; i < prevTxHash.length; i++)
+                    rawTx.add(prevTxHash[i]);
+            for (int i = 0; i < outputIndex.length; i++)
+                rawTx.add(outputIndex[i]);
+            if (signature != null)
+                for (int i = 0; i < signature.length; i++)
+                    rawTx.add(signature[i]);
+        }
+        for (Output op : outputs) {
+            ByteBuffer b = ByteBuffer.allocate(Double.SIZE / 8);
+            b.putDouble(op.value);
+            byte[] value = b.array();
+            byte[] addressExponent = ((RSAPublicKey) op.address).getPublicExponent().toByteArray();
+            byte[] addressModulus = ((RSAPublicKey) op.address).getModulus().toByteArray();
+            for (int i = 0; i < value.length; i++)
+                rawTx.add(value[i]);
+            for (int i = 0; i < addressExponent.length; i++)
+                rawTx.add(addressExponent[i]);
+            for (int i = 0; i < addressModulus.length; i++)
+                rawTx.add(addressModulus[i]);
+        }
+        byte[] tx = new byte[rawTx.size()];
+        int i = 0;
+        for (Byte b : rawTx)
+            tx[i++] = b;
+        return tx;
+    }
 
-   public byte[] getHash() {
-      return hash;
-   }
+    public void finalize() {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            md.update(getRawTx());
+            hash = md.digest();
+        } catch (NoSuchAlgorithmException x) {
+            x.printStackTrace(System.err);
+        }
+    }
 
-   public ArrayList<Input> getInputs() {
-      return inputs;
-   }
+    public void setHash(byte[] h) {
+        hash = h;
+    }
 
-   public ArrayList<Output> getOutputs() {
-      return outputs;
-   }
+    public byte[] getHash() {
+        return hash;
+    }
 
-   public Input getInput(int index) {
-      if (index < inputs.size()) {
-         return inputs.get(index);
-      }
-      return null;
-   }
+    public ArrayList<Input> getInputs() {
+        return inputs;
+    }
 
-   public Output getOutput(int index) {
-      if (index < outputs.size()) {
-         return outputs.get(index);
-      }
-      return null;
-   }
+    public ArrayList<Output> getOutputs() {
+        return outputs;
+    }
 
-   public int numInputs() {
-      return inputs.size();
-   }
+    public Input getInput(int index) {
+        if (index < inputs.size()) {
+            return inputs.get(index);
+        }
+        return null;
+    }
 
-   public int numOutputs() {
-      return outputs.size();
-   }
+    public Output getOutput(int index) {
+        if (index < outputs.size()) {
+            return outputs.get(index);
+        }
+        return null;
+    }
 
-   public boolean equals(Object other) {
-      if (other == null) {
-         return false;
-      }
-      if (getClass() != other.getClass()) {
-         return false;
-      }
+    public int numInputs() {
+        return inputs.size();
+    }
 
-      Transaction tx = (Transaction) other;
-      // inputs and outputs should be same
-      if (tx.numInputs() != numInputs())
-         return false;
+    public int numOutputs() {
+        return outputs.size();
+    }
 
-      for (int i = 0; i < numInputs(); i++) {
-         if (!getInput(i).equals(tx.getInput(i)))
+    public boolean equals(Object other) {
+        if (other == null) {
             return false;
-      }
-      
-      if (tx.numOutputs() != numOutputs())
-         return false;
-
-      for (int i = 0; i < numOutputs(); i++) {
-         if (!getOutput(i).equals(tx.getOutput(i)))
+        }
+        if (getClass() != other.getClass()) {
             return false;
-      }
-      return true;
-   }
+        }
 
-   public int hashCode() {
-      int hash = 1;
-      for (int i = 0; i < numInputs(); i++) {
-         hash = hash * 31 + getInput(i).hashCode();
-      }
-      for (int i = 0; i < numOutputs(); i++) {
-         hash = hash * 31 + getOutput(i).hashCode();
-      }
-      return hash;
-   }
+        Transaction tx = (Transaction) other;
+        // inputs and outputs should be same
+        if (tx.numInputs() != numInputs())
+            return false;
+
+        for (int i = 0; i < numInputs(); i++) {
+            if (!getInput(i).equals(tx.getInput(i)))
+                return false;
+        }
+
+        if (tx.numOutputs() != numOutputs())
+            return false;
+
+        for (int i = 0; i < numOutputs(); i++) {
+            if (!getOutput(i).equals(tx.getOutput(i)))
+                return false;
+        }
+        return true;
+    }
+
+    public int hashCode() {
+        int hash = 1;
+        for (int i = 0; i < numInputs(); i++) {
+            hash = hash * 31 + getInput(i).hashCode();
+        }
+        for (int i = 0; i < numOutputs(); i++) {
+            hash = hash * 31 + getOutput(i).hashCode();
+        }
+        return hash;
+    }
 }
